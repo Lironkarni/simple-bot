@@ -6,7 +6,7 @@ import requests
 from flask import Flask, request, jsonify
 
 # ===== קונפיג בסיסי (לבדיקה) =====
-TOKEN = "7626617241:AAHhxyP-CESGTxyP1EdpMZcfIxAhyl7fu8E"  # מומלץ להחליף/להסתיר בהמשך
+TOKEN = os.getenv("TOKEN")
 WEBHOOK_SECRET = "tg-webhook-123456"                      # שנה למחרוזת אקראית משלך
 API = f"https://api.telegram.org/bot{TOKEN}"
 
