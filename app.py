@@ -5,31 +5,46 @@ import threading
 import requests
 from flask import Flask, request, jsonify
 
-# ===== קונפיג בסיסי (לבדיקה) =====
-TOKEN = os.getenv("TOKEN")
-WEBHOOK_SECRET = "tg-webhook-123456"                      # שנה למחרוזת אקראית משלך
+# ===== קונפיג בסיסי =====
+TOKEN = os.getenv("TOKEN")  # ודא שהוגדר ב-Render → Environment (Key=TOKEN)
+if not TOKEN or ":" not in TOKEN:
+    raise RuntimeError("Missing/invalid TOKEN env var. Set TOKEN in Render → Environment.")
+
+WEBHOOK_SECRET = "tg-webhook-123456"  # מומלץ להחליף למחרוזת אקראית ארוכה
 API = f"https://api.telegram.org/bot{TOKEN}"
 
-DB_PATH = "subs.json"        # כאן נשמור נתונים פר-קבוצה: members + blacklist
+DB_PATH = "subs.json"        # כאן נשמור: members, blacklist, settings לכל קבוצה
 LOCK = threading.Lock()
-MENTION_CHUNK = 100          # כמה נקודות (תיוגים) בהודעה אחת
-MENTION_DELAY = 0.15         # שניה/חלק שניה בין הודעות כדי לא להיחנק מרייט-לימיט
+
+# תצורת שליחה של /dotall
+MENTION_CHUNK = 100          # כמה תיוגי-נקודה בהודעה אחת
+MENTION_DELAY = 0.15         # השהיה בין הודעות כדי לא להיחנק מרייט-לימיט
 
 app = Flask(__name__)
 
-# ---------- קריאה/כתיבה ל"מסד" עם תאימות לאחור ----------
+# ---------- DB עזר ----------
 def _ensure_chat_struct(db, chat_id_str):
     """
-    מבטיח שלקבוצה יש מבנה:
-    db[chat] = { "members": {uid: {...}}, "blacklist": {uid: {...}} }
-    ואם ישן (מפה של משתמשים בלבד), משדרג במקום.
+    מבטיח מבנה עדכני לכל קבוצה:
+    {
+      "members": { "<uid>": {...} },
+      "blacklist": { "<uid>": {...} },
+      "settings": { "dotall_anyone": false }
+    }
+    ותואם לגרסאות ישנות (ישדרג אם חסר).
     """
     if chat_id_str not in db:
-        db[chat_id_str] = {"members": {}, "blacklist": {}}
-    elif isinstance(db[chat_id_str], dict) and "members" not in db[chat_id_str]:
-        # מבנה ישן: dict של משתמשים → המרה
-        old = db[chat_id_str]
-        db[chat_id_str] = {"members": old, "blacklist": {}}
+        db[chat_id_str] = {"members": {}, "blacklist": {}, "settings": {"dotall_anyone": False}}
+    else:
+        chat_obj = db[chat_id_str]
+        if "members" not in chat_obj or not isinstance(chat_obj["members"], dict):
+            chat_obj["members"] = {}
+        if "blacklist" not in chat_obj or not isinstance(chat_obj["blacklist"], dict):
+            chat_obj["blacklist"] = {}
+        if "settings" not in chat_obj or not isinstance(chat_obj["settings"], dict):
+            chat_obj["settings"] = {"dotall_anyone": False}
+        if "dotall_anyone" not in chat_obj["settings"]:
+            chat_obj["settings"]["dotall_anyone"] = False
 
 def load_db():
     with LOCK:
@@ -38,12 +53,12 @@ def load_db():
         try:
             with open(DB_PATH, "r", encoding="utf-8") as f:
                 db = json.load(f)
-                # הבטחת מבנה
-                for k in list(db.keys()):
-                    _ensure_chat_struct(db, k)
-                return db
         except Exception:
-            return {}
+            db = {}
+        # ודא מבנה לכל הצ׳אטים
+        for k in list(db.keys()):
+            _ensure_chat_struct(db, k)
+        return db
 
 def save_db(db):
     with LOCK:
@@ -55,10 +70,9 @@ def is_blacklisted(chat_id: int, user_id: int) -> bool:
     cs = db.get(str(chat_id))
     if not cs:
         return False
-    return str(user_id) in cs.get("blacklist", {})
+    return str(user_id) in cs["blacklist"]
 
 def add_user(chat_id: int, user):
-    """מוסיף משתמש ל-members אם אינו ב-blacklist."""
     if not user or "id" not in user:
         return
     if is_blacklisted(chat_id, user["id"]):
@@ -79,12 +93,11 @@ def add_user(chat_id: int, user):
 def remove_user(chat_id: int, user_id: int):
     db = load_db()
     s = str(chat_id)
-    if s in db:
+    if s in db and str(user_id) in db[s]["members"]:
         db[s]["members"].pop(str(user_id), None)
         save_db(db)
 
 def blacklist_add(chat_id: int, user):
-    """מוסיף ל-blacklist ומסיר מ-members."""
     if not user or "id" not in user:
         return False
     db = load_db()
@@ -98,8 +111,7 @@ def blacklist_add(chat_id: int, user):
         "username": user.get("username"),
         "added_at": int(time.time())
     }
-    # מסירים מהחברים אם נמצא שם
-    db[s]["members"].pop(uid, None)
+    db[s]["members"].pop(uid, None)  # הסר מרשימת חברים אם קיים
     save_db(db)
     return True
 
@@ -124,13 +136,34 @@ def count_users(chat_id: int) -> int:
 
 def export_users(chat_id: int):
     db = load_db()
-    return list(db.get(str(chat_id), {}).get("members", {}).values())
+    s = str(chat_id)
+    if s not in db:
+        return []
+    return list(db[s]["members"].values())
 
 def list_blacklist(chat_id: int):
     db = load_db()
-    return list(db.get(str(chat_id), {}).get("blacklist", {}).values())
+    s = str(chat_id)
+    if s not in db:
+        return []
+    return list(db[s]["blacklist"].values())
 
-# ---------- עזר: שליחה וצ'קים ----------
+# ---- Settings (per chat) ----
+def get_setting(chat_id: int, key: str, default=None):
+    db = load_db()
+    s = str(chat_id)
+    if s not in db:
+        return default
+    return db[s]["settings"].get(key, default)
+
+def set_setting(chat_id: int, key: str, value):
+    db = load_db()
+    s = str(chat_id)
+    _ensure_chat_struct(db, s)
+    db[s]["settings"][key] = value
+    save_db(db)
+
+# ---------- Bot API עזר ----------
 def send_message(chat_id: int, text: str, reply_markup: dict | None = None, parse_mode: str | None = None):
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
@@ -154,18 +187,12 @@ def is_admin(chat_id: int, user_id: int) -> bool:
     return False
 
 def resolve_target_user(msg, arg: str | None):
-    """
-    מחלץ user (dict) על בסיס:
-    - reply להודעה → משתמש מה-reply
-    - arg מספרי → כ-ID מפורש
-    מחזיר dict {'id': ..} מינימלי או None.
-    """
     # reply
     reply = msg.get("reply_to_message")
     if reply and reply.get("from", {}).get("id"):
         u = reply["from"]
         return {"id": u["id"], "first_name": u.get("first_name"), "last_name": u.get("last_name"), "username": u.get("username")}
-    # arg
+    # arg מספרי
     if arg:
         arg = arg.strip()
         if arg.isdigit():
@@ -175,13 +202,13 @@ def resolve_target_user(msg, arg: str | None):
 # ---------- Flask routes ----------
 @app.route("/")
 def index():
-    return "OK - Group Manager Bot (members + blacklist + dot-mentions)!"
+    return "OK - Group Manager Bot (members + blacklist + dot-mentions + all_users setting)!"
 
 @app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
     update = request.get_json(silent=True) or {}
 
-    # הודעות רגילות (כולל הצטרפות/עזיבה בסיסית)
+    # ---- message / edited_message ----
     msg = update.get("message") or update.get("edited_message")
     if msg:
         chat = msg.get("chat", {})
@@ -190,32 +217,28 @@ def webhook():
         from_user = msg.get("from", {})
         text = (msg.get("text") or "").strip()
 
-        # א. הוספת שולחים ל-members אם לא blacklist
+        # שמירת שולחים/נכנסים/יוצאים
         if chat_type in {"group", "supergroup"} and from_user.get("id"):
             if not is_blacklisted(chat_id, from_user["id"]):
                 add_user(chat_id, from_user)
-
-        # ב. מצטרפים חדשים
         new_members = msg.get("new_chat_members") or []
-        for member in new_members:
-            if not is_blacklisted(chat_id, member.get("id", 0)):
-                add_user(chat_id, member)
+        for m in new_members:
+            if not is_blacklisted(chat_id, m.get("id", 0)):
+                add_user(chat_id, m)
+        left = msg.get("left_chat_member")
+        if left and left.get("id"):
+            remove_user(chat_id, left["id"])
 
-        # ג. עזיבה
-        left_member = msg.get("left_chat_member")
-        if left_member and left_member.get("id"):
-            remove_user(chat_id, left_member["id"])
-
-        # ----- פקודות בקבוצה -----
+        # ---- פקודות בקבוצה ----
         if chat_type in {"group", "supergroup"} and text:
             lower = text.lower()
 
-            # /count – כמה חברים ב-DB
+            # /count
             if lower == "/count":
                 send_message(chat_id, f"נשמרו {count_users(chat_id)} משתמשים (ללא blacklist).")
                 return jsonify(ok=True)
 
-            # /export – למנהלים בלבד: רשימת משתמשים (תמצית)
+            # /export (admins)
             if lower == "/export":
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/export.")
@@ -232,7 +255,7 @@ def webhook():
                 send_message(chat_id, "Export (ראשונים):\n" + "\n".join(lines))
                 return jsonify(ok=True)
 
-            # /bl_add [<id>] – הוספה ל-blacklist (אפשר גם כ-reply)
+            # /bl_add [id] (admins)
             if lower.startswith("/bl_add") or lower.startswith("/blacklist_add"):
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_add.")
@@ -248,7 +271,7 @@ def webhook():
                     send_message(chat_id, "לא הצלחתי להוסיף ל-blacklist.")
                 return jsonify(ok=True)
 
-            # /bl_remove [<id>] – הסרה מ-blacklist (אפשר גם כ-reply)
+            # /bl_remove [id] (admins)
             if lower.startswith("/bl_remove") or lower.startswith("/blacklist_remove"):
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_remove.")
@@ -264,7 +287,7 @@ def webhook():
                     send_message(chat_id, "לא נמצא ב-blacklist.")
                 return jsonify(ok=True)
 
-            # /bl_list – רשימת blacklisted (תמצית)
+            # /bl_list (admins)
             if lower == "/bl_list":
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_list.")
@@ -281,10 +304,37 @@ def webhook():
                 send_message(chat_id, "Blacklist (ראשונים):\n" + "\n".join(lines))
                 return jsonify(ok=True)
 
-            # /dotall – תייג את כל ה-members בתור נקודות "[.](tg://user?id=...)"
-            if lower == "/dotall":
+            # /all_users [on|off]  ← הגדרה מי יכול להריץ /dotall
+            if lower.startswith("/all_users"):
+                parts = text.split(maxsplit=1)
+                if len(parts) == 1:
+                    # הצגת סטטוס
+                    current = bool(get_setting(chat_id, "dotall_anyone", False))
+                    who = "כולם" if current else "מנהלים בלבד"
+                    send_message(chat_id, f"/dotall כרגע: {who}. לשינוי: /all_users on|off")
+                    return jsonify(ok=True)
+
+                # שינוי ערך – רק למנהלים
                 if not is_admin(chat_id, from_user.get("id", 0)):
-                    send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/dotall.")
+                    send_message(chat_id, "רק מנהלים יכולים לשנות /all_users.")
+                    return jsonify(ok=True)
+
+                arg = parts[1].strip().lower()
+                if arg in {"on", "off"}:
+                    value = (arg == "on")
+                    set_setting(chat_id, "dotall_anyone", value)
+                    who = "כולם" if value else "מנהלים בלבד"
+                    send_message(chat_id, f"הוגדר: /dotall זמין ל- {who}.")
+                else:
+                    send_message(chat_id, "שימוש: /all_users on או /all_users off")
+                return jsonify(ok=True)
+
+            # /dotall – תיוג נקודות לכולם (לפי ההגדרה)
+            if lower == "/dotall":
+                # בדיקת הרשאה: מותר אם מנהל, או אם ההגדרה מאפשרת לכולם
+                allow_all = bool(get_setting(chat_id, "dotall_anyone", False))
+                if not (is_admin(chat_id, from_user.get("id", 0)) or allow_all):
+                    send_message(chat_id, "הפקודה /dotall זמינה למנהלים בלבד. ניתן לשנות עם /all_users on")
                     return jsonify(ok=True)
 
                 ids = list_members_ids(chat_id)
@@ -292,22 +342,17 @@ def webhook():
                     send_message(chat_id, "אין חברים ב-DB לתייג.")
                     return jsonify(ok=True)
 
-                # בניית הודעות במנות
-                batch = []
                 total_sent = 0
+                batch = []
                 for uid in ids:
-                    # דולק־טקסט: נקודה מקושרת לפי ID, עם רווח אחרי
                     batch.append(f"[.](tg://user?id={uid})")
                     if len(batch) >= MENTION_CHUNK:
-                        text_chunk = " ".join(batch)
-                        send_message(chat_id, text_chunk, parse_mode="Markdown")
+                        send_message(chat_id, " ".join(batch), parse_mode="Markdown")
                         total_sent += len(batch)
                         batch = []
                         time.sleep(MENTION_DELAY)
-
                 if batch:
-                    text_chunk = " ".join(batch)
-                    send_message(chat_id, text_chunk, parse_mode="Markdown")
+                    send_message(chat_id, " ".join(batch), parse_mode="Markdown")
                     total_sent += len(batch)
 
                 send_message(chat_id, f"בוצע תיוג נקודות ל-{total_sent} משתמשים (ללא blacklist).")
@@ -315,7 +360,7 @@ def webhook():
 
         return jsonify(ok=True)
 
-    # chat_member – שינויים במצבי משתמש (נכנס/יצא/הורחק/קודם)
+    # ---- chat_member (join/leave/kick/promote) ----
     chat_member_update = update.get("chat_member")
     if chat_member_update:
         chat = chat_member_update.get("chat", {})
