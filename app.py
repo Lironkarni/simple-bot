@@ -20,6 +20,25 @@ LOCK = threading.Lock()
 MENTION_CHUNK = 100          # כמה תיוגי-נקודה בהודעה אחת
 MENTION_DELAY = 0.15         # השהיה בין הודעות כדי לא להיחנק מרייט-לימיט
 
+# טקסט עזרה לפרטי (/start, /help)
+HELP_TEXT = (
+    "👋 Hi! I'm a group management bot.\n\n"
+    "Group commands:\n"
+    "• /count — Show how many users are stored (excludes blacklist).\n"
+    "• /export — (Admins) Print a preview of stored users.\n"
+    "• /bl_add <id> — (Admins) Add a user to the blacklist. You can also reply to the user's message instead of <id>.\n"
+    "• /bl_remove <id> — (Admins) Remove a user from the blacklist (or reply).\n"
+    "• /bl_list — (Admins) Show the current blacklist (truncated).\n"
+    "• /all_users — Show who is allowed to run /dotall (admins only vs everyone).\n"
+    "• /all_users on|off — (Admins) Allow everyone to run /dotall or restrict it to admins only.\n"
+    "• /dotall — Send mass dot-mentions for all stored users in batches.\n\n"
+
+    "Notes:\n"
+    "• The bot auto-saves anyone who writes or joins; removes users when they leave.\n"
+    "• Users in the blacklist are not saved and won't be mentioned.\n"
+)
+
+
 app = Flask(__name__)
 
 # ---------- DB עזר ----------
@@ -55,7 +74,6 @@ def load_db():
                 db = json.load(f)
         except Exception:
             db = {}
-        # ודא מבנה לכל הצ׳אטים
         for k in list(db.keys()):
             _ensure_chat_struct(db, k)
         return db
@@ -111,7 +129,7 @@ def blacklist_add(chat_id: int, user):
         "username": user.get("username"),
         "added_at": int(time.time())
     }
-    db[s]["members"].pop(uid, None)  # הסר מרשימת חברים אם קיים
+    db[s]["members"].pop(uid, None)
     save_db(db)
     return True
 
@@ -217,14 +235,25 @@ def webhook():
         from_user = msg.get("from", {})
         text = (msg.get("text") or "").strip()
 
-        # שמירת שולחים/נכנסים/יוצאים
+        # ===== פרטִי: /start או /help → עזרה =====
+        if chat_type == "private":
+            if text.startswith("/start") or text.startswith("/help"):
+                send_message(chat_id, HELP_TEXT)
+                return jsonify(ok=True)
+            else:
+                send_message(chat_id, "היי! כתוב /start כדי לראות את כל הפקודות הזמינות.")
+                return jsonify(ok=True)
+
+        # ===== קבוצה/סופרקבוצה: שמירות בסיס =====
         if chat_type in {"group", "supergroup"} and from_user.get("id"):
             if not is_blacklisted(chat_id, from_user["id"]):
                 add_user(chat_id, from_user)
+
         new_members = msg.get("new_chat_members") or []
         for m in new_members:
             if not is_blacklisted(chat_id, m.get("id", 0)):
                 add_user(chat_id, m)
+
         left = msg.get("left_chat_member")
         if left and left.get("id"):
             remove_user(chat_id, left["id"])
@@ -308,13 +337,11 @@ def webhook():
             if lower.startswith("/all_users"):
                 parts = text.split(maxsplit=1)
                 if len(parts) == 1:
-                    # הצגת סטטוס
                     current = bool(get_setting(chat_id, "dotall_anyone", False))
                     who = "כולם" if current else "מנהלים בלבד"
                     send_message(chat_id, f"/dotall כרגע: {who}. לשינוי: /all_users on|off")
                     return jsonify(ok=True)
 
-                # שינוי ערך – רק למנהלים
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים לשנות /all_users.")
                     return jsonify(ok=True)
@@ -331,7 +358,6 @@ def webhook():
 
             # /dotall – תיוג נקודות לכולם (לפי ההגדרה)
             if lower == "/dotall":
-                # בדיקת הרשאה: מותר אם מנהל, או אם ההגדרה מאפשרת לכולם
                 allow_all = bool(get_setting(chat_id, "dotall_anyone", False))
                 if not (is_admin(chat_id, from_user.get("id", 0)) or allow_all):
                     send_message(chat_id, "הפקודה /dotall זמינה למנהלים בלבד. ניתן לשנות עם /all_users on")
