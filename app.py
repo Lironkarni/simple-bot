@@ -107,8 +107,12 @@ def is_blacklisted(chat_id: int, user_id: int) -> bool:
     return r.hexists(_k_blacklist(chat_id), str(user_id))
 
 def add_user(chat_id: int, user: dict):
-    if not user or "id" not in user: return
-    if is_blacklisted(chat_id, user["id"]): return
+    if not user or "id" not in user:
+        return
+    if user.get("is_bot"):  # ✅ לא שומרים בוטים
+        return
+    if is_blacklisted(chat_id, user["id"]):
+        return
     uid = str(user["id"])
     slim = {
         "id": user["id"],
@@ -117,7 +121,8 @@ def add_user(chat_id: int, user: dict):
         "username": user.get("username"),
         "added_at": int(time.time())
     }
-    r.hset(_k_members(chat_id), uid, json.dumps(slim, ensure_ascii=False))
+    redis_call(lambda: r.hset(_k_members(chat_id), uid, json.dumps(slim, ensure_ascii=False)))
+
 
 def remove_user(chat_id: int, user_id: int):
     r.hdel(_k_members(chat_id), str(user_id))
@@ -179,17 +184,27 @@ def set_setting(chat_id: int, key: str, value):
 def run_dotall(chat_id: int, ids: list[int]):
     total_sent = 0
     batch = []
+
+    # נטען מידע על כל משתמש כדי לוודא שלא מדובר בבוט
+    users_data = export_users(chat_id)
+    bots = {u["id"] for u in users_data if u.get("username") and u.get("username").endswith("bot") or u.get("is_bot")}
+
     for uid in ids:
+        if uid in bots:  # ✅ לא מתייג בוטים
+            continue
         batch.append(f"[.](tg://user?id={uid})")
         if len(batch) >= MENTION_CHUNK:
             send_message(chat_id, " ".join(batch), parse_mode="Markdown")
             total_sent += len(batch)
             batch = []
             time.sleep(MENTION_DELAY)
+
     if batch:
         send_message(chat_id, " ".join(batch), parse_mode="Markdown")
         total_sent += len(batch)
-    send_message(chat_id, f"בוצע תיוג נקודות ל-{total_sent} משתמשים (ללא blacklist).")
+
+    send_message(chat_id, f"בוצע תיוג נקודות ל-{total_sent} משתמשים (ללא blacklist וללא בוטים).")
+
 
 # ---------- Flask routes ----------
 @app.route("/")
