@@ -22,7 +22,7 @@ API = f"https://api.telegram.org/bot{TOKEN}"
 REDIS_URL = os.getenv("REDIS_URL")  # Render → Environment: REDIS_URL=rediss://...
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL env var.")
-r = Redis.from_url(REDIS_URL, decode_responses=True, ssl=True)
+r = Redis.from_url(REDIS_URL, decode_responses=True)
 
 # תצורת שליחה של /dotall
 MENTION_CHUNK = int(os.getenv("MENTION_CHUNK", "100"))
