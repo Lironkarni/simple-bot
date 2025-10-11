@@ -347,17 +347,17 @@ def webhook():
                     arg = text.split(maxsplit=1)[1] if " " in text else None
                     target = resolve_target_user(msg, arg)
                     if not target:
-                        send_message(chat_id, "שימוש: השב על הודעת המשתמש, או /bl_add <user_id>")
+                        #send_message(chat_id, "שימוש: השב על הודעת המשתמש, או /bl_add <user_id>")
                         return jsonify(ok=True)
                     if blacklist_add(chat_id, target):
-                        send_message(chat_id, f"נוסף ל-blacklist: {target['id']}. לא יישמר/יתוייג יותר.")
+                        send_message(chat_id, f" המשתמש לא יתוייג יותר")
                     else:
                         send_message(chat_id, "לא הצלחתי להוסיף ל-blacklist.")
                     return jsonify(ok=True)
 
                 if is_cmd("bl_remove") or is_cmd("blacklist_remove"):
                     if not is_admin(chat_id, from_user.get("id", 0)):
-                        send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_remove.")
+                        #send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_remove.")
                         return jsonify(ok=True)
                     arg = text.split(maxsplit=1)[1] if " " in text else None
                     target = resolve_target_user(msg, arg)
@@ -365,18 +365,18 @@ def webhook():
                         send_message(chat_id, "שימוש: השב על הודעת המשתמש, או /bl_remove <user_id>")
                         return jsonify(ok=True)
                     if blacklist_remove(chat_id, target["id"]):
-                        send_message(chat_id, f"הוסר מה-blacklist: {target['id']}.")
+                        send_message(chat_id, f"הוסר")
                     else:
-                        send_message(chat_id, "לא נמצא ב-blacklist.")
+                        #send_message(chat_id, "לא נמצא ב-blacklist.")
                     return jsonify(ok=True)
 
                 if is_cmd("bl_list"):
                     if not is_admin(chat_id, from_user.get("id", 0)):
-                        send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_list.")
+                        #send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_list.")
                         return jsonify(ok=True)
                     bl = list_blacklist(chat_id)
                     if not bl:
-                        send_message(chat_id, "ה-blacklist ריק.")
+                        #send_message(chat_id, "ה-blacklist ריק.")
                         return jsonify(ok=True)
                     lines = []
                     for u in bl[:200]:
