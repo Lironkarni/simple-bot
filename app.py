@@ -384,7 +384,7 @@ def webhook():
                     for u in bl[:200]:
                         name = (u.get("first_name") or "") + (" " + u.get("last_name") if u.get("last_name") else "")
                         name = name.strip() or (u.get("username") or "unknown")
-                        lines.append(f"{name} — {u['id"]}")
+                        lines.append(f"{name} — {u['id']}")
                     send_message(chat_id, "Blacklist (ראשונים):\n" + "\n".join(lines))
                     return jsonify(ok=True)
 
