@@ -4,25 +4,32 @@ from redis import Redis
 
 # ===== קונפיג בסיסי =====
 TOKEN = os.getenv("TOKEN")  # Render → Environment: TOKEN=xxxx:yyyy
-OWNER_ID = os.getenv("OWNER_ID")
-
-if OWNER_ID:
-    try:
-        OWNER_ID = int(OWNER_ID)
-    except ValueError:
-        OWNER_ID = None
-
 if not TOKEN or ":" not in TOKEN:
     raise RuntimeError("Missing/invalid TOKEN env var. Set TOKEN in Render → Environment.")
 
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "tg-webhook-123456")  # רצוי להחליף לערך אקראי ארוך
 API = f"https://api.telegram.org/bot{TOKEN}"
 
+# ---- Owner (מנהל־על) ----
+OWNER_ID = os.getenv("OWNER_ID")
+if OWNER_ID:
+    try:
+        OWNER_ID = int(OWNER_ID)
+    except ValueError:
+        OWNER_ID = None
+
 # ==== Redis (Upstash) ====
 REDIS_URL = os.getenv("REDIS_URL")  # Render → Environment: REDIS_URL=rediss://...
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL env var.")
+# חשוב: לא להעביר ssl=True כשמשתמשים ב-rediss://
 r = Redis.from_url(REDIS_URL, decode_responses=True)
+# דיאגנוסטיקה קלה ללוגים
+try:
+    r.ping()
+    print("✅ Redis connected")
+except Exception as e:
+    print("❌ Redis ping failed:", e)
 
 # תצורת שליחה של /dotall
 MENTION_CHUNK = int(os.getenv("MENTION_CHUNK", "100"))
@@ -70,7 +77,7 @@ def send_message(
         print("send_message fail:", rsp.status_code, rsp.text)
 
 def is_admin(chat_id: int, user_id: int) -> bool:
-    # אם המשתמש הוא הבעלים - תמיד נחשב אדמין
+    # הבעלים נחשב תמיד כאדמין
     if OWNER_ID and user_id == OWNER_ID:
         return True
     try:
@@ -83,7 +90,6 @@ def is_admin(chat_id: int, user_id: int) -> bool:
     except Exception as e:
         print("is_admin error:", e)
     return False
-
 
 def resolve_target_user(msg, arg: str | None):
     reply = msg.get("reply_to_message")
@@ -225,15 +231,41 @@ def webhook():
         if left and left.get("id"):
             remove_user(chat_id, left["id"])
 
-        # פקודות בקבוצה
+        # ===== פקודות בקבוצה – פרסינג נכון =====
         if chat_type in {"group", "supergroup"} and text:
-            lower = text.lower()
+            lower = text.strip().lower()
 
-            if lower == "/count":
+            # חילוץ הפקודה כפי שטלגרם מסמן ב-entities
+            entities = msg.get("entities") or []
+            cmd = None
+            for e in entities:
+                if e.get("type") == "bot_command":
+                    off = e.get("offset", 0)
+                    ln  = e.get("length", 0)
+                    cmd = (text[off:off+ln] or "").lower()
+                    break
+            if cmd:
+                # מסירים @username אם נוסף (/count@mybot)
+                cmd = cmd.split("@", 1)[0]
+
+            def is_cmd(name: str) -> bool:
+                if cmd:
+                    return cmd == f"/{name}"
+                # fallback אם משום מה אין entities
+                return lower.startswith(f"/{name}")
+
+            # ---- פקודות ----
+            if is_cmd("whoami"):
+                uid = from_user.get("id")
+                isown = "✅" if (OWNER_ID and uid == OWNER_ID) else "❌"
+                send_message(chat_id, f"ID: {uid}\nOwner: {isown}")
+                return jsonify(ok=True)
+
+            if is_cmd("count"):
                 send_message(chat_id, f"נשמרו {count_users(chat_id)} משתמשים (ללא blacklist).")
                 return jsonify(ok=True)
 
-            if lower == "/export":
+            if is_cmd("export"):
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/export.")
                     return jsonify(ok=True)
@@ -249,7 +281,7 @@ def webhook():
                 send_message(chat_id, "Export (ראשונים):\n" + "\n".join(lines))
                 return jsonify(ok=True)
 
-            if lower.startswith("/bl_add") or lower.startswith("/blacklist_add"):
+            if is_cmd("bl_add") or is_cmd("blacklist_add"):
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_add.")
                     return jsonify(ok=True)
@@ -264,7 +296,7 @@ def webhook():
                     send_message(chat_id, "לא הצלחתי להוסיף ל-blacklist.")
                 return jsonify(ok=True)
 
-            if lower.startswith("/bl_remove") or lower.startswith("/blacklist_remove"):
+            if is_cmd("bl_remove") or is_cmd("blacklist_remove"):
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_remove.")
                     return jsonify(ok=True)
@@ -279,7 +311,7 @@ def webhook():
                     send_message(chat_id, "לא נמצא ב-blacklist.")
                 return jsonify(ok=True)
 
-            if lower == "/bl_list":
+            if is_cmd("bl_list"):
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_list.")
                     return jsonify(ok=True)
@@ -295,18 +327,16 @@ def webhook():
                 send_message(chat_id, "Blacklist (ראשונים):\n" + "\n".join(lines))
                 return jsonify(ok=True)
 
-            if lower.startswith("/all_users"):
+            if is_cmd("all_users"):
                 parts = text.split(maxsplit=1)
                 if len(parts) == 1:
                     current = bool(get_setting(chat_id, "dotall_anyone", False))
                     who = "כולם" if current else "מנהלים בלבד"
                     send_message(chat_id, f"/dotall כרגע: {who}. לשינוי: /all_users on|off")
                     return jsonify(ok=True)
-
                 if not is_admin(chat_id, from_user.get("id", 0)):
                     send_message(chat_id, "רק מנהלים יכולים לשנות /all_users.")
                     return jsonify(ok=True)
-
                 arg = parts[1].strip().lower()
                 if arg in {"on", "off"}:
                     value = (arg == "on")
@@ -317,17 +347,15 @@ def webhook():
                     send_message(chat_id, "שימוש: /all_users on או /all_users off")
                 return jsonify(ok=True)
 
-            if lower == "/dotall":
+            if is_cmd("dotall"):
                 allow_all = bool(get_setting(chat_id, "dotall_anyone", False))
                 if not (is_admin(chat_id, from_user.get("id", 0)) or allow_all):
                     send_message(chat_id, "הפקודה /dotall זמינה למנהלים בלבד. ניתן לשנות עם /all_users on")
                     return jsonify(ok=True)
-
                 ids = list_members_ids(chat_id)
                 if not ids:
                     send_message(chat_id, "אין חברים ב-DB לתייג.")
                     return jsonify(ok=True)
-
                 threading.Thread(target=run_dotall, args=(chat_id, ids), daemon=True).start()
                 send_message(chat_id, f"מתחיל תיוג {len(ids)} משתמשים… זה ייקח רגע.")
                 return jsonify(ok=True)
