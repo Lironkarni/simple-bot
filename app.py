@@ -357,6 +357,7 @@ def webhook():
 
                 if is_cmd("bl_remove") or is_cmd("blacklist_remove"):
                     if not is_admin(chat_id, from_user.get("id", 0)):
+                        pass
                         #send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_remove.")
                         return jsonify(ok=True)
                     arg = text.split(maxsplit=1)[1] if " " in text else None
@@ -367,15 +368,18 @@ def webhook():
                     if blacklist_remove(chat_id, target["id"]):
                         send_message(chat_id, f"הוסר")
                     else:
+                        pass
                         #send_message(chat_id, "לא נמצא ב-blacklist.")
                     return jsonify(ok=True)
 
                 if is_cmd("bl_list"):
                     if not is_admin(chat_id, from_user.get("id", 0)):
+                        pass
                         #send_message(chat_id, "רק מנהלים יכולים להשתמש ב-/bl_list.")
                         return jsonify(ok=True)
                     bl = list_blacklist(chat_id)
                     if not bl:
+                        pass
                         #send_message(chat_id, "ה-blacklist ריק.")
                         return jsonify(ok=True)
                     lines = []
