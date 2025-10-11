@@ -4,6 +4,14 @@ from redis import Redis
 
 # ===== קונפיג בסיסי =====
 TOKEN = os.getenv("TOKEN")  # Render → Environment: TOKEN=xxxx:yyyy
+OWNER_ID = os.getenv("OWNER_ID")
+
+if OWNER_ID:
+    try:
+        OWNER_ID = int(OWNER_ID)
+    except ValueError:
+        OWNER_ID = None
+
 if not TOKEN or ":" not in TOKEN:
     raise RuntimeError("Missing/invalid TOKEN env var. Set TOKEN in Render → Environment.")
 
@@ -62,6 +70,9 @@ def send_message(
         print("send_message fail:", rsp.status_code, rsp.text)
 
 def is_admin(chat_id: int, user_id: int) -> bool:
+    # אם המשתמש הוא הבעלים - תמיד נחשב אדמין
+    if OWNER_ID and user_id == OWNER_ID:
+        return True
     try:
         rsp = requests.get(f"{API}/getChatMember",
                            params={"chat_id": chat_id, "user_id": user_id},
@@ -72,6 +83,7 @@ def is_admin(chat_id: int, user_id: int) -> bool:
     except Exception as e:
         print("is_admin error:", e)
     return False
+
 
 def resolve_target_user(msg, arg: str | None):
     reply = msg.get("reply_to_message")
