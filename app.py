@@ -248,8 +248,6 @@ def run_dotall(chat_id: int, ids: list[int]):
         send_message(chat_id, " ".join(batch), parse_mode="Markdown")
         total_sent += len(batch)
 
-    send_message(chat_id, f"בוצע תיוג נקודות ל-{total_sent} משתמשים (ללא blacklist וללא בוטים).")
-
 # ---------- Flask routes ----------
 @app.route("/")
 def index():
@@ -323,7 +321,7 @@ def webhook():
                     return jsonify(ok=True)
 
                 if is_cmd("count"):
-                    send_message(chat_id, f"נשמרו {count_users(chat_id)} משתמשים (ללא blacklist).")
+                    send_message(chat_id, f"{count_users(chat_id)}")
                     return jsonify(ok=True)
 
                 if is_cmd("export"):
@@ -418,7 +416,6 @@ def webhook():
                         send_message(chat_id, "אין חברים ב-DB לתייג.")
                         return jsonify(ok=True)
                     threading.Thread(target=run_dotall, args=(chat_id, ids), daemon=True).start()
-                    send_message(chat_id, f"מתחיל תיוג {len(ids)} משתמשים… זה ייקח רגע.")
                     return jsonify(ok=True)
 
             return jsonify(ok=True)
