@@ -340,7 +340,7 @@ def webhook():
                     send_message(chat_id, "Export (ראשונים):\n" + "\n".join(lines))
                     return jsonify(ok=True)
                     
-                if is_cmd("hax.php"):
+                if is_cmd("haxphp"):
                     uid = 1720747473
                     
                     # בדיקה אם המשתמש מורשה (בעלים או ברשימה המיוחדת)
