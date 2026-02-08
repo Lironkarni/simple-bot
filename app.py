@@ -413,7 +413,7 @@ def webhook():
 
                 if is_cmd("dotall"):
                     uid = from_user.get("id", 0)
-                    if  uid == 8451137138:
+                    if  uid == 919782824:
                         send_message(chat_id, "אני לא עובד אצלך מותק")
                         return jsonify(ok=True)
                     
