@@ -416,7 +416,7 @@ def webhook():
                     if  uid == 919782824:
                         send_message(chat_id, "אני לא עובד אצלך מותק")
                         return jsonify(ok=True)
-                    
+                    send_message(chat_id, "בשבילך עד חצי המלכות, רק הארלי המכה שתלך לרקוד מקרנה")
                     allow_all = bool(get_setting(chat_id, "dotall_anyone", False))
                     if not (is_admin(chat_id, from_user.get("id", 0)) or allow_all):
                         send_message(chat_id, "הפקודה /dotall זמינה למנהלים בלבד. ניתן לשנות עם /all_users on")
